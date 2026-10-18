@@ -17,7 +17,7 @@ UID1_EXE = 0x1000007A
 UID1_DLL = 0x10000079
 CPU_ARMV5 = 0x2001             # e32_cpu::armv5
 
-# flags bitfield (e32img.cpp dump_flag_info / header_format)
+# flags bitfield
 FLAG_DLL = 0x00000001
 FLAG_ABI_EABI = 0x1 << 3       # bits 3-4 ABI: 1 = EABI
 FLAG_EPT_EKA2 = 0x1 << 5       # bits 5-7 entry-point type: >=1 = EKA2
@@ -29,11 +29,11 @@ FLAG_IMPFMT_ELF = 0x1 << 28    # bits 28-31 import format: 0 = PE, 1 = ELF, 2 = 
 FLAGS_DEFAULT_EXE = FLAG_ABI_EABI | FLAG_EPT_EKA2 | FLAG_HDRFMT_V  # 0x02000028
 
 
-# ── UID checksum (crypt.cpp: crc16 / calculate_checksum / ..._uid_checksum) ──
+# ── UID checksum ──
 def _crc_ccitt_table() -> list[int]:
     """CRC-CCITT/XModem table: poly 0x1021, MSB-first, init 0.
 
-    Matches crypt.cpp:24 (crc_tab starts 0x0000, 0x1021, 0x2042, 0x3063, ...).
+    (crc_tab starts 0x0000, 0x1021, 0x2042, 0x3063, ...).
     """
     table = []
     for i in range(256):
@@ -49,20 +49,20 @@ _CRC_TAB = _crc_ccitt_table()
 
 
 def crc16(crc: int, data: bytes) -> int:
-    """crypt.cpp:51 — crc = (crc<<8) ^ tab[((crc>>8) ^ byte) & 0xff]."""
+    """crc = (crc<<8) ^ tab[((crc>>8) ^ byte) & 0xff]."""
     for b in data:
         crc = ((crc << 8) ^ _CRC_TAB[((crc >> 8) ^ b) & 0xFF]) & 0xFFFF
     return crc
 
 
 def _checksum_half(uid12: bytes, start: int) -> int:
-    """crypt.cpp:196 — CRC over 6 bytes sampled every other byte from `start`."""
+    """CRC over 6 bytes sampled every other byte from `start`."""
     sampled = uid12[start:12:2]  # start, start+2, ... start+10 (6 bytes)
     return crc16(0, sampled)
 
 
 def uid_checksum(uid1: int, uid2: int, uid3: int) -> int:
-    """crypt.cpp:214 — (odd_crc << 16) | even_crc over the 12-byte UID block."""
+    """(odd_crc << 16) | even_crc over the 12-byte UID block."""
     uid12 = struct.pack("<III", uid1, uid2, uid3)
     even = _checksum_half(uid12, 0)  # bytes 0,2,4,6,8,10
     odd = _checksum_half(uid12, 1)   # bytes 1,3,5,7,9,11
@@ -72,7 +72,7 @@ def uid_checksum(uid1: int, uid2: int, uid3: int) -> int:
 # ── Header ───────────────────────────────────────────────────────────────────
 @dataclass
 class E32ImageHeader:
-    """The 124-byte basic header (e32img.h:118, sizeof == 124, no padding).
+    """The 124-byte basic header (sizeof == 124, no padding).
 
     `check` is computed from the UIDs; leave it None and call finalize().
     """
@@ -109,7 +109,7 @@ class E32ImageHeader:
     import_offset: int = 0
     code_reloc_offset: int = 0
     data_reloc_offset: int = 0
-    priority: int = 350           # process_priority::foreground (process.h:81)
+    priority: int = 350           # process_priority::foreground
     cpu: int = CPU_ARMV5
 
     def finalize(self) -> "E32ImageHeader":
@@ -121,7 +121,7 @@ class E32ImageHeader:
         self.finalize()
         # module_version occupies the 4 bytes at offset 24 (struct: major u16,
         # minor u16). We pack it as one LE u32 so callers can reason about the
-        # whole word (the EKA1-detection landmine, spec §1).
+        # whole word.
         blob = struct.pack(
             "<"      # little-endian
             "I"      # uid1
@@ -199,15 +199,15 @@ class VSection:
 # ── Relocations ──────────────────────────────────────────────────────────────
 # rel_info u16 = (type << 12) | (offset & 0x0FFF); the loader does
 # virtual_addr = block.base + (info & 0xFFF), rel_type = info & 0xF000
-# (libmanager.cpp:59), then *(code_base_ptr + virtual_addr) += delta
-# (codeseg.cpp:166), where text delta = code_run_addr - code_base.
-RELOC_RESERVED = 0x0000   # also the block padding value (loader::relocation_type)
+# then *(code_base_ptr + virtual_addr) += delta, where text delta = code_run_addr - code_base.
+RELOC_RESERVED = 0x0000   # also the block padding value
 RELOC_TEXT = 0x1000       # fix by (code_run_addr - code_base)
 RELOC_DATA = 0x2000       # fix by (data_run_addr - data_base)
 RELOC_INFERRED = 0x3000   # loader picks text/data by inspecting the stored value
 
+
 def build_reloc_section(offsets, rtype: int = RELOC_TEXT) -> bytes:
-    """A relocation section per `read_relocations` (e32img.cpp:101).
+    """A relocation section.
 
     Layout: [size u32][num_relocs u32] then per-4KB-page blocks
             [base u32][block_size u32][rel_info u16 ...]. Each block is padded
@@ -218,11 +218,10 @@ def build_reloc_section(offsets, rtype: int = RELOC_TEXT) -> bytes:
     `offsets` is either a list[int] (all fixed up with the uniform `rtype`
     delta-selector nibble) or a dict[int, int] mapping each offset to its own
     nibble (RELOC_TEXT / RELOC_DATA / RELOC_INFERRED). The nibble selects the
-    DELTA (codeseg.cpp:135): TEXT=code_delta, DATA=data_delta, INFERRED=by value.
+    DELTA: TEXT=code_delta, DATA=data_delta, INFERRED=by value.
     The SECTION the word lives in (text vs data base_ptr) is set separately by
-    which section this reloc belongs to (code_reloc vs data_reloc, libmanager
-    .cpp:64) — so a word in code that points into data goes in the code-reloc
-    section with a DATA nibble.
+    which section this reloc belongs to (code_reloc vs data_reloc) — so a word in
+    code that points into data goes in the code-reloc section with a DATA nibble.
     """
     from collections import OrderedDict
 
@@ -250,8 +249,7 @@ def build_reloc_section(offsets, rtype: int = RELOC_TEXT) -> bytes:
 
 # ── Imports (EKA2 / "elf" form) ──────────────────────────────────────────────
 def build_import_section(imports) -> tuple[bytes, int]:
-    """Build the EKA2 import section (e32img.cpp:462, resolved by
-    libmanager.cpp:135 `elf_fix_up_import_dir`).
+    """Build the EKA2 import section.
 
     `imports` is a list of `(dll_name, entries)` blocks, where `entries` is a
     list of `(code_offset, ordinal, adj)`. For modern (>= eka2) images the block

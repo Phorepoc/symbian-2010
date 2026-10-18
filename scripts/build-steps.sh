@@ -18,6 +18,7 @@ step() {	# step <name> <command...> : run, log, stop on failure
 # The components of Symbian's minigui configuration are listed in emitter/components.py.
 KEYS=$(python3 -c "import sys; sys.path.insert(0, 'emitter'); import components; print(' '.join(components.COMPONENTS))")
 
+step executive-headers bash toolchain/genexec.sh
 step kernel-nanokernel bash kernel/build_nkern.sh
 step kernel-ekern bash kernel/build_ekern.sh
 step euser python3 emitter/build_euser_device.py

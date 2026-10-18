@@ -18,3 +18,4 @@
 /emitter/*.romfiles
 /emitter/*.meta
 __pycache__/
+/toolchain/generated/

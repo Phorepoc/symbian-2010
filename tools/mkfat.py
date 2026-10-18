@@ -7,7 +7,7 @@ partition at offset 0 (syborg_mednvmemory.cpp PartitionInfo). This writes such
 an image so C: boots with content -- e.g. fonts on a NON-ROM drive, which makes
 fntstore take its RAM path like a real (NAND) phone does.
 
-    py tools/mkfat.py out.img  'Resource/Fonts/ceurope.gdr=path/to/CEUROPE.GDR' [...]
+    python3 tools/mkfat.py out.img  'Resource/Fonts/ceurope.gdr=path/to/CEUROPE.GDR' [...]
         [--size 0x4000000]
 
 8.3 names only (upper-cased); directories are created as needed.

@@ -21,9 +21,8 @@ RCOMP = "rcomp"
 
 
 def compile_rss(rss: str, rsc: str, rsg: str | None = None, incs=(), uids=(), lang="SC",
-                defs=(), variant_of: str | None = None) -> tuple[bool, str]:
-    """-> (ok, log). variant_of: preprocess under the product variant of THAT path (a board delta of a resource
-    source is compiled as the file it replaces, X4.79)."""
+                defs=()) -> tuple[bool, str]:
+    """-> (ok, log)."""
     os.makedirs(os.path.dirname(rsc), exist_ok=True)
     rpp = rsc + ".rpp"
     inc_args = []
@@ -31,7 +30,7 @@ def compile_rss(rss: str, rsc: str, rsg: str | None = None, incs=(), uids=(), la
         inc_args += ["-I", d]
     r = subprocess.run([MMP.CPP, "-undef", "-nostdinc", "-x", "c", "-w",
                         f"-DLANGUAGE_{lang}", "-D_UNICODE", *[f"-D{d}" for d in defs],
-                        *inc_args, "-include", MMP.variant_for(variant_of or rss), rss, "-o", rpp],
+                        *inc_args, "-include", MMP.variant_for(rss), rss, "-o", rpp],
                        capture_output=True, text=True, errors="replace")
     if r.returncode:
         return False, "cpp: " + r.stderr[-1500:]

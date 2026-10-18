@@ -1,5 +1,5 @@
-/* efile.ld — link script for the from-source EFILE.EXE (Track B / M7).
- * spike.ld plus: the EXE entry (_E32Startup) and the static-ctor table.
+/* efile.ld — link script for the from-source EFILE.EXE.
+ * euser.ld plus: the EXE entry (_E32Startup) and the static-ctor table.
  * .init_array is KEEPed INSIDE the .text output section so elf.extract's
  * ".text = code+rodata" view spans it and its ABS32 entries become ordinary
  * TEXT relocs; dev_exe_startup.cpp walks __init_array_start..__init_array_end

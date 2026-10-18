@@ -146,8 +146,8 @@ class RomBuilder:
                                     # iDataBssRunAddress != iDataBssLinearBase. (Was wrongly the
                                     # image size; harmless for the kernel, fatal for a user EXE.)
                          module_version,  # @112 iModuleVersion: the E32 header's (major<<16|minor). The loader matches
-                                    #      versioned imports (name{000a0000}.dll = 10.0 or later, every SDK app) against it;
-                                    #      0 made each such import "not found" and the process was killed at load (X-plore)
+                                    #      versioned imports (name{000a0000}.dll = 10.0 or later) against it;
+                                    #      0 would make each such import "not found"
                          # @116 iExceptionDescriptor: the E32 header's (code offset | 1) as an address -- the C++ unwinder
                          # (drtaeabi, UserSvr::ExceptionDescriptor) finds a ROM image's .ARM.exidx through it
                          (code_addr + exc_desc) if exc_desc else 0)
@@ -204,7 +204,7 @@ class RomBuilder:
         """entries: list of (name, addr_lin, size, is_dir). Returns the packed rom_dir.
 
         REAL TRomDir format (e32rom.h + srom/sr_rom.cpp -- the fileserver's rom fs
-        binary-searches these, found live at M7 Fault(38) EMainScanMediaDriverDirOpen):
+        binary-searches these):
           int32 iSize            bytes of the TRomEntry region ONLY (not this field)
           TRomEntry iEntry...    each {i32 size, u32 addr_lin, u8 att, u8 nameLen,
                                  utf16 name}, 4-aligned
@@ -309,8 +309,7 @@ class RomBuilder:
         struct.pack_into("<q", self.rom, H_iTime, itime_symbian)
         struct.pack_into("<I", self.rom, H_iRomBase, self.rom_base)
         # A whole number of pages, as a real rombuild image: the bootstrap's ROM bank size (-> the super page's
-        # iTotalRomSize) follows iRomSize, and the FLEXIBLE memory model's DRomMemoryManager::Init3 claims that
-        # many bytes of ROM pages -- a non-page-multiple is KErrArgument -> FAULT mrom.cpp:475 (PinePhone SMP rung).
+        # iTotalRomSize) follows iRomSize.
         self.rom.extend(b"\0" * (-len(self.rom) % 0x1000))
         struct.pack_into("<I", self.rom, H_iRomSize, len(self.rom))
         struct.pack_into("<I", self.rom, H_iUncompressedSize, len(self.rom))
@@ -380,8 +379,7 @@ class E32Xip:
         self.secure_id, self.vendor_id = g(128), g(132)
         self.module_version = g(24)  # E32ImageHeader iModuleVersion
         # the ABI bits (KImageABIMask == KRomImageABIMask 0x18; EABI = 0x08): the loader refuses an explicit RLibrary::Load of a
-        # DLL whose ABI differs from the process (sf_lepoc.cpp ABIFAIL) -- with 0 here every ROM DLL was 'GCC98r2' and an SDK
-        # (EABI) app's RLibrary::Load("z:euser") got KErrNotSupported (X-plore, 2026-10-12)
+        # DLL whose ABI differs from the process (sf_lepoc.cpp ABIFAIL)
         self.abi_flags = g(44) & 0x18
         self.exc_desc = g(144)       # E32ImageHeaderV iExceptionDescriptor (code offset | 1; 0 = no unwind tables)
         self.code = bytearray(d[code_off:code_off + self.code_size])
@@ -408,8 +406,7 @@ class E32Xip:
         if not off:
             return []
         # E32RelocSection.iSize is the size of the BLOCKS, not counting its own 8-byte header (elf2e32
-        # e32imagefile.cpp, F32's ValidateRelocations). The emitter counted the header until X4.37, and
-        # images of both kinds are about, so walk by the relocation COUNT, which both agree on.
+        # e32imagefile.cpp, F32's ValidateRelocations); walk by the relocation COUNT.
         _size, total = struct.unpack_from("<II", d, off)
         out, p = [], off + 8
         while len(out) < total:
@@ -435,8 +432,8 @@ class E32Xip:
         return blocks
 
     def export_run(self, e):
-        """The run-time address of an export given at its link address. An exported STATIC (S4.2: Qt 4 exports
-        QListData::shared_null & co, which its inline code refcounts) lives in the DLL's data, so it moves with the
+        """The run-time address of an export given at its link address. An exported STATIC (a data export)
+        lives in the DLL's data, so it moves with the
         DATA delta -- to the DLL's one data address in RAM -- not with the code: given the code delta, the entry
         pointed at the initial copy of the data inside the ROM image and the first write faulted."""
         dsz = self.data_size + self.bss_size
@@ -479,7 +476,7 @@ class E32Xip:
                 (w,) = struct.unpack_from("<I", self.code, off)
                 ordn, adj = w & 0xFFFF, w >> 16
                 if adj >= 0x8000:
-                    adj -= 0x10000      # S4.3: a signed 16-bit addend (Qt: &QVectorData::shared_null - 8)
+                    adj -= 0x10000      # a signed 16-bit addend
                 if not 1 <= ordn <= tgt.export_count:
                     raise ValueError(f"{self.zname}: ordinal {ordn} out of range for {dll}")
                 # export entries are ABSOLUTE link-space addresses (code_base+off)
@@ -564,7 +561,7 @@ def prelink_e32(rom_builder, imgs, exe_data_run_base, data_top=KUserDataAddress_
         cur += XIP_HDR_SIZE + plen
     for img in imgs:
         img.resolve(by_name, exe_data_run_base if img.is_exe else img.data_run)
-    # placement map for tools/romsym.py: name, ROM code addr, code len, link base
+    # placement map (<rom>.map): name, ROM code addr, code len, link base
     global LAST_XIP_MAP
     LAST_XIP_MAP = [(img.zname.rsplit("\\", 1)[-1].lower(), img.code_addr,
                             len(img.code), img.link_code_base) for img in imgs]

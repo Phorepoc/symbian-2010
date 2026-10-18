@@ -25,8 +25,7 @@ class DefMap:
     max_ordinal: int
     data_names: frozenset = frozenset()   # exports flagged DATA (vtables, consts)
     # ordinals marked ABSENT: the slot is kept (callers' numbering) but the DLL no longer provides the
-    # symbol -- e.g. S60 moved CEikStatusPaneBase from eikcore (ABSENT there) to eikcoctl. Never an
-    # import provider (X4.51: about.exe bound ControlL to eikcore's absent slot -> EUSRNIMP).
+    # symbol (it moved to another DLL). Never an import provider.
     absent: frozenset = frozenset()
 
     def name(self, ordinal: int) -> str | None:

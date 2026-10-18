@@ -1,4 +1,4 @@
-/* mmp_dll.ld — link script for build_mmp.py DLLs. spike.ld plus: _E32Dll
+/* mmp_dll.ld — link script for build_mmp.py DLLs. euser.ld plus: _E32Dll
  * (toolchain/dll_rt/dll_entry.s) pinned at code offset 0 = the image entry
  * point; .init_array surfaced (KEEPed + bracketed) so the builder can SEE a
  * DLL that needs static construction instead of silently dropping it. */
