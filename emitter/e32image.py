@@ -1,7 +1,8 @@
 """E32Image emitter: assembles a Symbian E32Image (DLL, or EXE with imports/exports) from the code, data,
 relocations and import/export tables elf.extract took from a linked ELF.
 
-Everything little-endian. The image is what the ROM builder (tools/rombuild.py) takes: it prelinks it into the ROM,
+The layout, flags and constants are the release's own (kernelhwsrv userlibandfileserver/fileserver/inc/f32image.h,
+EPL); everything is little-endian. The image is what the ROM builder (tools/rombuild.py) takes: it prelinks it into the ROM,
 applying the relocations and resolving the ordinal imports.
 """
 
@@ -15,7 +16,7 @@ from dataclasses import dataclass, field
 E32IMG_SIGNATURE = 0x434F5045  # 'EPOC' LE
 UID1_EXE = 0x1000007A
 UID1_DLL = 0x10000079
-CPU_ARMV5 = 0x2001             # e32_cpu::armv5
+CPU_ARMV5 = 0x2001             # ECpuArmV5
 
 # flags bitfield
 FLAG_DLL = 0x00000001
