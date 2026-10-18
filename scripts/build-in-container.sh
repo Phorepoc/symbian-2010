@@ -21,6 +21,7 @@ cd /build
 rc=0
 bash scripts/build-steps.sh || rc=$?
 mkdir -p /work/out
+rm -rf /work/out/log
 cp -a /build/out/. /work/out/
 chown -R "${HOST_UID:-0}:${HOST_GID:-0}" /work/out 2>/dev/null || true
 exit $rc

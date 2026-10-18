@@ -52,7 +52,7 @@ def main() -> None:
         if hit is None:
             continue
         link = os.path.join(OUT, *s.split("/"))
-        if os.path.lexists(link) or os.path.basename(hit) == os.path.basename(link) and hit.endswith("/" + s):
+        if os.path.lexists(link):
             continue
         os.makedirs(os.path.dirname(link), exist_ok=True)
         os.symlink(hit, link)

@@ -26,12 +26,11 @@ jobs:
           # the file server, the window server and the shell were started, and nothing faulted
           grep -q '\[proc\] create .*ESHELL' out/serial.log
           ! grep -q 'K::Fault\|Kern::Fault' out/serial.log
-          # the screen is not blank: the framebuffer holds more than one colour
+          # the screen is not blank: the framebuffer holds more than one colour (text on a plain background)
           python3 - <<'PY'
-          import zlib, struct
           d = open('out/fb.ppm', 'rb').read()
           pix = d[-768 * 640 * 3:]
-          assert len(set(pix[i:i + 3] for i in range(0, len(pix), 3 * 97))) > 3, "screen is blank"
+          assert len(set(pix[i:i + 3] for i in range(0, len(pix), 3))) >= 2, "screen is blank"
           print("screen has content")
           PY
 
