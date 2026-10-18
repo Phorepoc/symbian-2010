@@ -15,7 +15,7 @@ build itself always runs inside the [Phorepoc toolchain image](https://github.co
 
 ```sh
 ./fetch.sh      # the sources, into src/ (shallow clones at the pinned commits)
-./build.sh      # out/minigui.rom and out/c_drive.img  (about 20 minutes from scratch, less when re-run)
+./build.sh      # out/minigui.rom and out/c_drive.img  (from scratch: a few minutes on a many-core machine, up to 20 on a laptop; re-runs only rebuild what changed)
 ./boot.sh       # boots the ROM, types `dir`, writes out/fb.png and out/serial.log
 ```
 
