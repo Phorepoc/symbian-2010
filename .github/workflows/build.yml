@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  minigui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch the Symbian sources
+        run: ./fetch.sh
+
+      - name: Build the ROM
+        run: ./build.sh
+
+      - name: Boot it on QEMU Syborg
+        run: ./boot.sh
+
+      - name: Check the boot
+        run: |
+          # the file server, the window server and the shell were started, and nothing faulted
+          grep -q '\[proc\] create .*ESHELL' out/serial.log
+          ! grep -q 'K::Fault\|Kern::Fault' out/serial.log
+          # the screen is not blank: the framebuffer holds more than one colour
+          python3 - <<'PY'
+          import zlib, struct
+          d = open('out/fb.ppm', 'rb').read()
+          pix = d[-768 * 640 * 3:]
+          assert len(set(pix[i:i + 3] for i in range(0, len(pix), 3 * 97))) > 3, "screen is blank"
+          print("screen has content")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boot
+          path: |
+            out/fb.png
+            out/serial.log
+            out/log/
+            out/qemu-monitor.log

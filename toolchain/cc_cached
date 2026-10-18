@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# cc_cached -- a compile cache in front of any compiler invocation that has `-o <obj>`.
+#   toolchain/cc_cached <compiler> <args...> -o out.o        (or: . toolchain/cc_cached; cc_cached_run <compiler> ...)
+# Skips the compile when out.o exists, the command line is the one that produced it (out.o.cmd) and no file the
+# compiler listed in out.o.d (the source + every header it included, via -MMD) is newer than out.o. Otherwise
+# compiles with -MMD -MF out.o.d and records the command line. CC_CACHE=0 disables it (always compile);
+# CC_CACHE_LOG=1 prints hit/miss. Used by toolchain/symcc (sourced: every kernel/driver C++ TU) and
+# kernel/link_ekern.sh; the objects are kept between runs.
+cc_cached_run() {
+  local out="" prev="" a cmd stale f rc
+  for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+  if [ "${CC_CACHE:-1}" = 0 ] || [ -z "$out" ]; then "$@"; return $?; fi
+  cmd="$*"
+  if [ -f "$out" ] && [ -f "$out.d" ] && [ -f "$out.cmd" ] && [ "$(cat "$out.cmd")" = "$cmd" ]; then
+    stale=0
+    # the .d file: "out.o: src.cpp \ hdr.h ..." -- every path after the colon; line continuations ("\" at the end)
+    # dropped, a "\ " inside a path is a space, carried through the word split as \x01 (pure bash: no process per TU)
+    local d IFS=$' \t\n'; d="$(<"$out.d")"; d="${d//$'\r'/}"; d="${d//\\$'\n'/ }"; d="${d//\\ /$'\x01'}"; d="${d#*: }"
+    for f in $d; do
+      f="${f//$'\x01'/ }"
+      if [ ! -f "$f" ] || [ "$f" -nt "$out" ]; then stale=1; break; fi
+    done
+    if [ $stale = 0 ]; then [ "${CC_CACHE_LOG:-0}" = 1 ] && echo "cc_cached: hit $out" >&2; return 0; fi
+  fi
+  [ "${CC_CACHE_LOG:-0}" = 1 ] && echo "cc_cached: miss $out" >&2
+  rm -f "$out" "$out.cmd"
+  "$@" -MMD -MF "$out.d"; rc=$?
+  [ $rc = 0 ] && [ -f "$out" ] && printf '%s' "$cmd" > "$out.cmd"
+  return $rc
+}
+# executed, not sourced: run the command line given
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then set -u; cc_cached_run "$@"; exit $?; fi

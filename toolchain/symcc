@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# symcc — compile unmodified Symbian 2010 baseline C++ with a MODERN GNU ARM
+# compiler (arm-none-eabi-g++ 14.x). Proves we need neither RVCT nor GCCE:
+# a current upstream toolchain + our prefix shim digests the OS source, and the
+# resulting ELF feeds our own emitter/elf.py -> E32Image (no elf2e32).
+#
+# Usage:  toolchain/symcc [-k] <src.cpp> [-o out.o] [extra g++ args...]
+#   -k   kernel-side compile (adds -D__KERNEL_MODE__ + kernel include dir)
+# Prints the g++ exit code.
+set -u
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+GXX="${SYMBIAN_GXX:-arm-none-eabi-g++}"
+B="$REPO/src/oss.FCL.sf.os.kernelhwsrv/kernel/eka"
+
+KERNEL=0
+if [ "${1:-}" = "-k" ]; then KERNEL=1; shift; fi
+SRC="$1"; shift
+# user side: -fstack-reuse=named_vars -- `TPckg<T> p(x.Id()); SendReceive(.., &p)` keeps the ADDRESS of a dead
+# temporary; RVCT left such slots alone, GCC reuses them
+USERFLAGS=(); [ "$KERNEL" = 1 ] || USERFLAGS=(-fstack-reuse=named_vars)
+
+DEFS=(-D__SYMBIAN32__ -D__GCCE__ -D__EABI__ -D__MARM__ -D__MARM_ARMV5__ -D__EPOC32__ -D_UNICODE)
+# Deliberately NO -D__GCC32__ (see toolchain/symbian_gcc_prefix.h).
+FLAGS=(-c -march=armv5te -fshort-wchar -fno-short-enums
+       -fno-exceptions -fno-rtti -fpermissive
+       -fno-lifetime-dse -fno-strict-aliasing -fno-delete-null-pointer-checks
+       -ffunction-sections -fdata-sections "${USERFLAGS[@]}"
+       -include "$REPO/toolchain/symbian_gcc_prefix.h")
+# -fno-short-enums: bare-metal arm-none-eabi defaults to PACKED enums (1/2 bytes); the
+# Symbian EABI (RVCT --enum_is_int, GCCE/arm-none-symbianelf) makes every enum an int.
+# Source relies on it: avkon's `UpdateFromCenRep(..., (TInt&)iLayoutId, ...)` wrote 4 bytes
+# through an unaligned 1-byte enum member -> alignment fault (KERN-EXEC 3).
+# -fno-delete-null-pointer-checks: 2010 source calls members through NULL and tests `this`/
+# dereferenced pointers afterwards (RVCT kept the tests); modern -O2 deletes them.
+# -fno-strict-aliasing: 2010 source is not aliasing-clean (RVCT/old GCCE never exploited it).
+# (e.g. `TInt32 value=0; DecodeBytes(p,(TUint16*)&value);` then reading value: modern -O2 keeps the 0.)
+# -ffunction-sections/-fdata-sections: emit each function/datum in its own section
+# so the final link can --gc-sections away everything not reachable from the
+# exports. This lets us add whole large euser TUs (us_exec.cpp etc.) for the few
+# entry points we need, and the linker prunes the rest.
+# -fno-lifetime-dse: Symbian's RHeap/RHybridHeap set members (iBase) inside a
+# custom `operator new` BEFORE the constructor runs. Modern GCC's lifetime-based
+# dead-store elimination treats those pre-ctor writes as dead and drops them
+# (legacy RVCT/GCCE kept them), which zeroes iBase and faults the heap. This
+# pattern is pervasive in Symbian, so disable that optimisation everywhere.
+# .cia = hand-written ARM naked-asm TU: compile as C++ ARM (not Thumb), with
+# __CIA__ and the pre-C++11 dialect (old adjacent string-literal concat in the
+# asm() macros). Everything else is Thumb C++.
+# SYMCC_ARM=1 forces ARM (not Thumb) for .cpp too — used when the output must be
+# reached by a plain `blx` from ARM caller code without a Thumb-bit dance.
+case "$SRC" in
+  *.cia) FLAGS+=(-x c++ -std=gnu++03 -marm); DEFS+=(-D__CIA__) ;;
+  *)     if [ "${SYMCC_ARM:-0}" = "1" ]; then FLAGS+=(-marm -mthumb-interwork)
+         else FLAGS+=(-mthumb -mthumb-interwork); fi ;;
+esac
+INCS=(-I"$REPO/toolchain/overlay" -I"$REPO/toolchain/generated"
+      -I"$B/include"
+      -I"$B/euser" -I"$B/euser/cbase" -I"$B/euser/epoc/arm" -I"$B/euser/maths"
+      -I"$B/euser/unicode"
+      -I"$B/common"
+      # the 2010 source was written for a case-insensitive file system: tools/casefix.py links the headers whose
+      # names have upper-case letters under their lower-case names; searched last, it only supplies what was not found
+      -idirafter "$REPO/.casefix")
+if [ "$KERNEL" -eq 1 ]; then
+  DEFS+=(-D__KERNEL_MODE__)
+  # nkern + ARM CPU + memory-model + kernel-arm headers, plus the kinc staging dir that forwards headers the SBS
+  # build exports to a relocated path (e.g. <kernel/heap_hybrid.h> -> include/heap_hybrid.h) which we don't have an
+  # epoc32/include tree to provide. See toolchain/kinc/.
+  INCS+=(-I"$B/include/kernel" -I"$B/include/memmodel"
+         -I"$B/include/nkern" -I"$B/include/nkern/arm"
+         -I"$B/include/kernel/arm" -I"$B/include/memmodel/epoc"
+         -I"$REPO/toolchain/kinc")
+fi
+
+# SYMCC_PRINT=1: print the compiler command (NUL-separated, before the source) and exit -- build_mmp.py and
+# cc_batch.py run g++ directly with it (one shell start per translation unit is slow)
+if [ "${SYMCC_PRINT:-0}" = 1 ]; then printf '%s\0' "$GXX" "${FLAGS[@]}" "${DEFS[@]}" "${INCS[@]}"; exit 0; fi
+# the compile cache (toolchain/cc_cached, sourced -- no extra process per TU): with -o out.o, the TU is compiled only
+# when out.o is missing, its command line changed, or the source / a header it included is newer. CC_CACHE=0 = off.
+. "$REPO/toolchain/cc_cached"
+cc_cached_run "$GXX" "${FLAGS[@]}" "${DEFS[@]}" "${INCS[@]}" "$SRC" "$@"
+rc=$?
+echo "symcc exit: $rc"
+exit $rc
