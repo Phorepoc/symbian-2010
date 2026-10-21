@@ -3,8 +3,7 @@
 Reads a *linked* ELF produced with `-Wl,-q` (--emit-relocs): the linker resolves
 all internal references and lays sections at their final VMAs, but keeps the
 relocation records so we can re-emit the ones that need runtime fixup as E32
-relocations. This is the toolchain-free-emitter half of Path A2
-(docs/track-u/tls-p1-scope.md): our own emitter, not elf2e32, turns compiled ARM
+relocations. Our own emitter, not elf2e32, turns compiled ARM
 into an E32Image.
 
 Scope: exactly what the P1b spike + a first real DLL need — SHT_PROGBITS section
