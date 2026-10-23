@@ -534,8 +534,33 @@ def prelink_e32(rom_builder, imgs, exe_data_run_base, data_top=KUserDataAddress_
         for img in imgs:
             if not img.data_present and any(d.data_present for d in img.deps):
                 img.data_present = changed = True
+    # iDllRefTable exactly as the 2010 rombuild (r_rom.cpp E32Rom::ProcessDependencies / TRomFile::MarkDeps): the FLATTENED transitive
+    # closure of the image's dependencies, filtered to the EXEs (first) plus the DLLs that OWN data (KRomImageFlagData == own_wsd), in
+    # image order -- NOT the direct DataPresent deps (that made one WSD DLL, e.g. a euser with a 4-byte bss, drag every intermediate
+    # DataPresent DLL into every table and the kernel's ListDeps closure past 256 -> KERN-EXEC 39). An image that reaches an EXE gets
+    # KRomImageFlagExeInTree; EXE->other EXE and DLL->two EXEs are errors in the real tool (warnings here).
+    order = {id(i): n for n, i in enumerate(imgs)}
+    old_total = sum(len([d for d in img.deps if d.data_present]) for img in imgs)
     for img in imgs:
-        img.ref_deps = [d for d in img.deps if d.data_present]
+        seen, stack = set(), list(img.deps)
+        while stack:
+            d = stack.pop()
+            if id(d) in seen:
+                continue
+            seen.add(id(d))
+            stack.extend(d.deps)
+        reached = sorted((i for i in imgs if id(i) in seen), key=lambda i: order[id(i)])
+        exes = [i for i in reached if i.is_exe]
+        keep = [i for i in reached if not i.is_exe and i.own_wsd]
+        if not img.is_exe and len(exes) > 1:
+            print(f"rombuild: WARNING DLL {img.zname} links to more than one EXE: {[e.zname for e in exes]}", file=sys.stderr)
+        if img.is_exe and any(e is not img for e in exes):
+            print(f"rombuild: WARNING EXE {img.zname} links to other EXEs: {[e.zname for e in exes if e is not img]}", file=sys.stderr)
+        img.exe_in_tree = bool(exes)
+        img.ref_deps = exes + keep
+    new_total = sum(len(img.ref_deps) for img in imgs)
+    print(f"rombuild: dll-ref tables: {old_total} direct-DataPresent entries (old) -> {new_total} flattened-KEEP entries (2010 ProcessDependencies); "
+          f"max per image {max((len(i.ref_deps) for i in imgs), default=0)}", file=sys.stderr)
     cur = len(rom_builder.rom)
     for img in imgs:
         cur = (cur + 3) & ~3
