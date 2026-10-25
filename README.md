@@ -1,112 +1,83 @@
 # symbian-2010
 
-The 2010 Symbian open-source release, built from source and booted on QEMU Syborg to Symbian's own **minigui**
-configuration: the release's EKA2 kernel, file server and window server, with the text shell (ESHELL) running in a
-graphical WSERV window.
+This is the 2010 Symbian open-source release, built from its own source with a modern compiler and booted in the
+Symbian QEMU. Nothing in the Symbian source is edited. It runs the release's own kernel, file server and window server,
+in the stripped-down **minigui** setup Symbian used to bring up new hardware.
 
-The source is not in this repository. [`sources.lock`](sources.lock) pins the commits of the 13 SymbianSource packages
-the build needs, and [`fetch.sh`](fetch.sh) takes them from the [Phorepoc forks](https://github.com/Phorepoc). What is
-here is what turns that source into a ROM: the build scripts, the modern-GCC glue, and an ELF-to-E32Image emitter.
+![The Symbian text shell running in minigui on QEMU Syborg](docs/minigui-eshell.png)
+
+That's all you get, though: a text shell in a window, with a working keyboard and a C: drive. There's no S60 home
+screen, no apps and no touch interface. The display is the emulator's plain 768x640 framebuffer, and booting to the
+prompt takes 30 to 50 seconds, because QEMU 0.9.1 has no CPU acceleration.
+
+If you want the full Symbian^3 interface on modern hardware, that's what [Phorepoc](https://github.com/Phorepoc) is
+for. This repository is deliberately frozen. Its job is to keep the original release running as close as possible to
+how it shipped.
 
 ## Quick start
 
-You need Docker, git and about 4 GB of disk. Linux, macOS and Windows (Docker Desktop, Linux containers) work; the
-build itself always runs inside the [Phorepoc toolchain image](https://github.com/Phorepoc/toolchain).
+You'll need Docker, git and about 4 GB of disk. It works on Linux, macOS and Windows, since the build always runs
+inside the [Phorepoc toolchain image](https://github.com/Phorepoc/toolchain).
 
 ```sh
-./fetch.sh      # the sources, into src/ (shallow clones at the pinned commits)
-./build.sh      # out/minigui.rom and out/c_drive.img  (from scratch: a few minutes on a many-core machine, up to 20 on a laptop; re-runs only rebuild what changed)
-./boot.sh       # boots the ROM, types `dir`, writes out/fb.png and out/serial.log
+./fetch.sh      # download the source into src/
+./build.sh      # build out/minigui.rom and out/c_drive.img
+./boot.sh       # boot it, type `dir`, and save out/fb.png and out/serial.log
 ```
 
-`build.sh` runs in a Docker volume (`phorepoc-symbian-2010`) that also keeps the objects, so a second run only rebuilds
-what changed; `FULL=1 ./build.sh` starts from scratch. Every step logs to `out/log/`. `boot.sh` boots the ROM on the
-[Phorepoc QEMU Syborg image](https://github.com/Phorepoc/qemu-syborg) (`ghcr.io/phorepoc/qemu-syborg`), which is also
-where to look for running it by hand (`run-syborg`, keyboard input through the QEMU monitor).
+The first build takes a few minutes on a big machine, or up to 20 on a laptop. After that only what changed gets
+rebuilt, and `FULL=1 ./build.sh` starts from scratch. Every step logs to `out/log/`.
 
-CI ([`.github/workflows/build.yml`](.github/workflows/build.yml)) does exactly this on every push and keeps the
-screenshot and the serial log as artifacts.
+`boot.sh` uses the emulator image from [qemu-syborg](https://github.com/Phorepoc/qemu-syborg), whose README also
+explains how to run it by hand and watch it live. The CI does exactly these three steps on every push and keeps the
+screenshot and the serial log.
 
-## What you get
+## How it works
 
-![ESHELL running in Symbian's minigui configuration on QEMU Syborg](docs/minigui-eshell.png)
+The source isn't stored here. `sources.lock` pins the 13 Symbian packages the build needs, and `fetch.sh` downloads
+them from our mirrors.
 
-This is the 2010 release booted on this image: its own EKA2 kernel, file server and window server, built from the
-original source with a modern compiler, running Symbian's **minigui** configuration. That is the text shell (ESHELL)
-in a graphical window-server window, with the keyboard working and a FAT C: drive (here after typing `dir`).
+The release was written for Nokia's ARM compiler, RVCT, and a build tool called `elf2e32` that doesn't exist for
+modern compilers. So we compile with today's GCC 14, and our own scripts in `emitter/` turn each compiled ELF file into
+a Symbian E32Image, using the import and export tables frozen in the release's `.def` files. `tools/rombuild.py` then
+puts everything into a ROM. The Syborg bootstrap was written in RVCT assembler, and `tools/armasm2gas/` translates it
+for the GNU assembler.
 
-Set your expectations accordingly:
-- There is **no S60 UI** here: no home screen, no launcher, no apps, no touch UI. Minigui is the configuration
-  Symbian itself used to bring up new hardware.
-- The display is the Syborg board's plain 768x640 framebuffer, and input is the emulated keyboard.
-- Boot to the prompt takes about 30-50 seconds; QEMU 0.9.1 emulates the CPU without acceleration.
+The source also assumes a case-insensitive file system, with includes like `<f32plugin.h>` that only exist as
+`F32plugin.h`. Rather than rename anything, `tools/casefix.py` adds links for every spelling the source uses.
 
-The emulator image is [Phorepoc/qemu-syborg](https://github.com/Phorepoc/qemu-syborg).
+## What we had to add
 
-### A frozen baseline
+We didn't edit any Symbian file, but a modern compiler and a board with no real hardware need a few things added next
+to the source:
 
-This image, and the 2010 baseline it runs, will most likely **stay frozen**: the point is to keep the original
-release running as close to how it shipped as possible. The deeper and heavier changes happen elsewhere, in
-Phorepoc OS's architecture, platform and device adaptations, where the S60 UI is optimised and modernised for today's
-hardware.
+- **Compiler glue.** `toolchain/symbian_gcc_prefix.h` defines what the release's own compiler headers expected but GCC
+  doesn't provide. Two small header overlays fix code that modern GCC treats differently. One is `TRAP`, which returns
+  twice and has to be marked so, or locals get lost across a leave.
+- **Compiler flags.** The release depends on how RVCT and old GCC behaved, so we turn off a few modern optimisations,
+  such as `-fno-strict-aliasing` and `-fno-delete-null-pointer-checks`. Each one has its reason in `toolchain/symcc`
+  and `emitter/build_mmp.py`.
+- **Runtime pieces** in `toolchain/dll_rt/` and `toolchain/efile_exe/` start up DLLs and programs the way the old
+  toolchain's runtime did.
+- **Kernel glue** in `kernel/` starts the Syborg display, storage and input drivers, which a real ROM would load from
+  files. It also works around one hand-written assembler routine that GCC miscompiles.
+- **Two stand-ins.** The graphics resource and surface update libraries are replaced with empty versions, because the
+  emulator has no GPU and no compositor. Tracing is turned off, since the trace compiler wasn't part of the release.
 
-## How it is built
+Everything else, including the window server and the screen driver, is built unmodified from its own `.mmp` file.
 
-| step | what | where |
-|---|---|---|
-| executive headers | `genexec.pl` of the release over `execs.txt` | `toolchain/genexec.sh` |
-| nanokernel, kernel | the unmodified 2010 EKA2 kernel (multiple memory model), compiled with `arm-none-eabi-g++` 14 | `kernel/build_nkern.sh`, `kernel/build_ekern.sh` |
-| euser, efsrv, hal | the user library, file server client and HAL, from the release's sources and `.def` files | `emitter/build_euser_device.py`, `build_efsrv_device.py`, `build_hal_device.py` |
-| epoc32/include | what `abld export` does: the headers every component exports, from the `bld.inf` files | `tools/epoc32_export.py`, `tools/casefix.py` |
-| file server | EFILE from the release's sources | `kernel/build_efile.sh`, `emitter/build_efile_exe.py` |
-| components | every component of minigui from its real `.mmp`: resources with the release's `rcomp`, code with the compiler, import and export tables from the frozen `.def` files | `emitter/components.py`, `emitter/build_mmp.py` |
-| boot pieces | ESTART, the FAT file system plug-in, the keymap, ESHELL | `emitter/build_estart_exe.py`, `build_elocal_fsy.py`, `build_ekdata_dll.py`, `build_eshell_exe.py` |
-| bootstrap | the Syborg bootstrap, RVCT armasm translated to GNU as | `tools/armasm2gas/` |
-| kernel link, ROM | the kernel linked at its ROM address with the Syborg variant and drivers, then the ROM image | `kernel/link_ekern.sh`, `kernel/build_rom.sh`, `tools/rombuild.py` |
-| C: drive | a FAT16 image carrying the bitmap font | `tools/mkfat.py` |
-
-The compiler is not the one the release was written for, so the images are not produced by `elf2e32`: the linker's ELF
-output goes through `emitter/elf.py` (read the code, data and relocations) and `emitter/e32image.py` (write the
-E32Image), and `tools/rombuild.py` prelinks the images into the ROM.
-
-The 2010 source was written for a case-insensitive file system (`#include <f32plugin.h>` finds `F32plugin.h`).
-`tools/casefix.py` links each spelling the source uses into `.casefix/`, which the compiler searches last, so nothing in
-the source is renamed or edited.
-
-## What is ours, and what changes the original
-
-**No file of the Symbian source is edited.** Everything below is added beside it, or replaces a component, and is
-needed because of the compiler or because there is no real hardware:
-
-| what | why |
-|---|---|
-| `toolchain/symbian_gcc_prefix.h`, force-included in every translation unit | the release's compiler headers (`__GCCE__`/RVCT) define a few things a current GCC does not |
-| `toolchain/overlay/e32cmn.h`, `e32cmn.inl` (include path overlays that `#include_next` the real headers) | with `-fno-exceptions` `TRAP` is the `setjmp`-style `TTrap::Trap`, which returns twice: the overlay declares it `returns_twice`, or GCC 14 keeps locals live across a leave in registers the leave then restores. And `_LIT_SECURE_ID` converts through a reference to a temporary that modern GCC replaces with NULL |
-| `toolchain/kinc/` | forwarders for headers the release's build exports to a relocated path (`<kernel/heap_hybrid.h>`) |
-| `toolchain/euser_dll/` | three small adapters for euser: the exec layer (`dev_user_execs.cpp` emits the generated executive), forwarders for the descriptor assembler's old-GCC names, sized `operator delete` |
-| `toolchain/dll_rt/`, `toolchain/efile_exe/` | DLL and EXE entry and runtime pieces (`_E32Dll`, the `.init_array` walk, `__cxa_pure_virtual`), and a wrapper of the loader's `E32Image::LoadCodeSeg` that answers for drivers linked into the kernel (display) |
-| `toolchain/shims/sgresource_null.cpp`, `surfaceupdateclient_null.cpp` | replace the sources of `sgresource.dll` and `surfaceupdateclient.dll`, with the real `.def` ordinal tables: the board has no GPU resource provider and no compositor, and the generic screen driver draws straight into the framebuffer |
-| `toolchain/shims/ost_off/` | `OstTraceDefinitions.h` is generated by a trace compiler that is not part of the release; tracing is off |
-| `kernel/ekern_seam.cpp` | the glue the kernel link needs: `HwInit0`, the variant entry, `TDesC8::Mid` (a hand-written assembler function modern GCC miscompiles, replaced through `ld --wrap`), skipping `P::StartExtensions` (the drivers are linked in), starting the built-in drivers and the file server, and a serial trace |
-| `kernel/ekern_fb_glue.cpp`, `ekern_media_glue.cpp`, `ekern_input_glue.cpp` | bring up the Syborg framebuffer, local media and input drivers, which a ROM would load from files |
-| the compiler flags in `toolchain/symcc` and `emitter/build_mmp.py` | `-fno-strict-aliasing`, `-fno-delete-null-pointer-checks`, `-fno-lifetime-dse`, `-fno-short-enums` ...: the 2010 source relies on what RVCT and GCC 3 did, each flag has its reason in the file |
-
-The window server, the screen driver and the other components are built unmodified from their `.mmp` files. The one
-component that is not the release's own is the bitmap font rasterizer plug-in, where Symbian's own `stubrasterizer.mmp`
-(no vector stack in this configuration) is used.
-
-## Layout
+## Finding your way around
 
 ```
-fetch.sh, sources.lock   the sources, pinned
-build.sh, boot.sh        build in the toolchain image, boot on QEMU Syborg
+fetch.sh, sources.lock   the source, pinned
+build.sh, boot.sh        build in the toolchain image, boot in QEMU
 scripts/                 what runs inside the container
 kernel/                  kernel build and link, the glue, the ROM recipe
-emitter/                 .mmp parser, component registry, ELF -> E32Image, one build script per image
+emitter/                 the .mmp reader, the component list, ELF to E32Image
 toolchain/               compiler driver, prefix header, overlays, runtime pieces
-tools/                   ROM writer, include export, bootstrap translation, FAT image, PNG writer
+tools/                   ROM writer, header export, bootstrap translation, FAT image
 ```
 
-## Licence
+## License
 
-[EPL-1.0](LICENSE), the licence of the Symbian release. The fetched source keeps its own licence headers.
+EPL-1.0, the license of the Symbian release. The downloaded source keeps its own license headers.
